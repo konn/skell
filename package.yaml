@@ -41,6 +41,7 @@ library:
   - bifunctors
   - profunctors
   - mtl
+  - transformers
 
 executables:
   skell:

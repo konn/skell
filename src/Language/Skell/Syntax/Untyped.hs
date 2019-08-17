@@ -1,7 +1,11 @@
-{-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveGeneric           #-}
-{-# LANGUAGE DeriveTraversable, DerivingStrategies, PatternSynonyms #-}
+{-# LANGUAGE DataKinds, DeriveAnyClass, DeriveFoldable, DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric, DeriveTraversable, DerivingVia            #-}
+{-# LANGUAGE PatternSynonyms, TemplateHaskell, TypeApplications       #-}
+{-# LANGUAGE TypeOperators                                            #-}
 module Language.Skell.Syntax.Untyped where
 import Control.Monad
+import Data.Deriving
+import Data.Hashable.Lifted
 import Data.Unification.Generic
 import Data.Void
 import GHC.Generics
@@ -20,9 +24,18 @@ data UExpr' s u v
 
 type UExpr = UExpr' ()
 
-data UTypeRep' v = UNatT | UArrT (UTypeRep' v) (UTypeRep' v) | UVarT v
-  deriving (Read, Show, Eq, Ord, Generic1)
-  deriving (Functor, Foldable, Traversable)
+data UTypeRep' v = UNatT | (UTypeRep' v) :-> (UTypeRep' v) | UVarT v
+  deriving stock (Read, Show, Eq, Ord, Generic1)
+  deriving stock (Functor, Foldable, Traversable)
+  deriving anyclass (Hashable1)
+infixr 0 :->
+
+deriveEq1 ''UTypeRep'
+deriveShow1 ''UTypeRep'
+deriveOrd1 ''UTypeRep'
+
+instance Matchable UTypeRep' where
+  match = matchWithMetaVarCon @"UVarT"
 
 instance Applicative UTypeRep' where
   pure = return
@@ -31,17 +44,8 @@ instance Applicative UTypeRep' where
 instance Monad UTypeRep' where
   return = UVarT
   UNatT >>= _ = UNatT
-  (UArrT l r) >>= f = UArrT (l >>= f) (r >>= f)
+  (l :-> r) >>= f = (l >>= f) :-> (r >>= f)
   UVarT v >>= f = f v
 
 type UTypeRep = UTypeRep' Void
 
-instance Matchable UTypeRep' where
-  match (UVarT a)   (UVarT b) = Just [a :== UVarT b]
-  match (UVarT a)   ty        = Just [a :== ty]
-  match ty          (UVarT a) = Just [a :== ty]
-  match UNatT       UNatT     = Just []
-  match (UArrT l r) (UArrT l' r') =
-    (++) <$> match l l'  <*> match r r'
-  match UArrT{} UNatT{} = Nothing
-  match UNatT{} UArrT{} = Nothing

@@ -8,7 +8,7 @@
 {-# LANGUAGE TypeFamilies, TypeOperators, UndecidableInstances             #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Data.Unification.Generic
-  ( Equation(..), Subst(..), UTree, UnificationError(..)
+  ( Equation(..), (%==), Subst(..), UTree, UnificationError(..)
   , WithMetaVarCon(..), matchWithMetaVarCon
   , hoistEq, decompEq, matchFree
   , metavars
@@ -128,6 +128,11 @@ data Equation t a = Free t a :== Free t a
   deriving (Read, Show, Eq, Ord, Generic, Generic1,
             Functor, Foldable, Traversable)
   deriving anyclass (Hashable1)
+infix 4 :==
+
+(%==) :: Functor t => t a -> t a -> Equation t a
+(%==) = (:==) `on` liftF
+infix 4 %==
 
 hoistEq :: Functor u => (forall x. t x -> u x) -> Equation t a -> Equation u a
 {-# INLINE [1] hoistEq #-}
@@ -265,6 +270,12 @@ instance (Functor t, Hashable1 t, Eq1 t) => GMatchable' t (Rec1 t) Par1 where
 
 instance (Functor t, Hashable1 t, Eq1 t) => GMatchable' t (Rec1 t) (Rec1 t) where
   gmatch (Rec1 f) (Rec1 g) = Just [liftF f :== liftF g]
+
+instance GMatchable' t U1 U1 where
+  gmatch U1 U1 = Just []
+
+instance GMatchable' t V1 V1 where
+  gmatch = const $ const $ Just []
 
 instance Eq v => GMatchable' t (K1 i v) (K1 i v) where
   gmatch (K1 a) (K1 b) = guard (a == b) >> pure []

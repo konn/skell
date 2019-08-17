@@ -22,21 +22,21 @@ module Data.Unification.Generic
   ) where
 import           Control.Applicative
 import           Control.Arrow
-import           Control.Exception              (Exception)
+import           Control.Exception                (Exception)
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.Free
-import           Control.Monad.Trans.Writer.CPS
+import           Control.Monad.Trans.State.Strict
 import           Data.Foldable
 import           Data.Function
 import           Data.Functor.Classes
 import           Data.Functor.Identity
 import           Data.Hashable
 import           Data.Hashable.Lifted
-import           Data.HashMap.Strict            (HashMap)
-import qualified Data.HashMap.Strict            as HM
-import           Data.HashSet                   (HashSet)
-import qualified Data.HashSet                   as HS
+import           Data.HashMap.Strict              (HashMap)
+import qualified Data.HashMap.Strict              as HM
+import           Data.HashSet                     (HashSet)
+import qualified Data.HashSet                     as HS
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Proxy
@@ -47,7 +47,7 @@ import           GHC.TypeLits
 import           Unsafe.Coerce
 
 newtype UnifyT t v m a =
-  UnifyT { runUnifyT :: WriterT (Subst t v) (ExceptT (First (UnificationError t v)) m)  a }
+  UnifyT { runUnifyT :: StateT (Subst t v) (ExceptT (First (UnificationError t v)) m)  a }
   deriving newtype (Functor, Applicative, Monad, MonadPlus, Alternative)
 
 data UnificationError t v =
@@ -75,11 +75,12 @@ data UnifyStep t v =
   | NewClauses (HashSet (Equation t v))
   deriving (Read, Show, Eq, Ord, Generic)
 
-newSubst :: (Eq v, Hashable v, Monad m)
+newSubst :: (Functor t, Eq v, Hashable v, Monad m)
          => v -> Free t v -> UnifyT t v m (UnifyStep t v)
-newSubst v t = do
-  let subs = Subst $ HM.singleton v t
-  UnifyT $ tell subs
+newSubst v t = UnifyT $ do
+  substs <- get
+  let subs = Subst $ HM.singleton v (substituteFree substs t)
+  put $ substs <> subs
   return $ NewSubst subs
 
 step
@@ -104,7 +105,7 @@ unifyM
 unifyM =
     fmap (left $ fromJust . getFirst)
   . runExceptT
-  . execWriterT
+  . flip execStateT mempty
   . runUnifyT . go . HS.fromList
   where
   go !inp

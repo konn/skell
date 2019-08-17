@@ -1,0 +1,4 @@
+.stack-work/
+skell.cabal
+stack.yaml.lock
+*~

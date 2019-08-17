@@ -2,7 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
 {-# LANGUAGE StandaloneDeriving, UndecidableInstances          #-}
 module Data.Fresh.Monad
-  ( FreshT, FreshM,
+  ( FreshT, FreshM, Fresh,
     runFreshT, runFresh, runFreshWith, runFreshTWith,
     fresh, reserve, reserveMany,
     Var(..)

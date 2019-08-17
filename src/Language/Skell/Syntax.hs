@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances, GADTs, LiberalTypeSynonyms, RankNTypes #-}
 {-# LANGUAGE TypeOperators                                             #-}
 module Language.Skell.Syntax where
+import Control.Indexed
 import Control.Monad.State.Strict
 import Data.Fresh
 import Numeric.Natural
@@ -30,15 +31,6 @@ data PrimOp = Fst | Snd | IsZero deriving (Read, Show, Eq, Ord)
 data PrimBin
   = Add | Sub | Mul | Div | Mod
   | Pair | Eql | Lt deriving (Read, Show, Eq, Ord)
-
-type a ~> b = forall x. a x -> b x
-infixr 0 ~>
-class IProfunctor p where
-  idimap :: (u' ~> u) -> (v ~> v') -> p u v -> p u' v'
-  ilmap  :: (u' ~> u) -> p u v -> p u' v
-  ilmap f = idimap f id
-  irmap :: (v ~> v')  -> p u v -> p u v'
-  irmap = idimap id
 
 instance IProfunctor (ExprF a) where
   idimap _ _ (PrimI i)        = PrimI i

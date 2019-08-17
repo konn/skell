@@ -26,7 +26,6 @@ import           Data.HashMap.Strict         (HashMap)
 import qualified Data.HashMap.Strict         as HM
 import           Data.HashSet                (HashSet)
 import qualified Data.HashSet                as HS
-import           Data.Monoid
 import           Data.Typeable
 import           Data.Unification.Generic
 import           Data.Void
@@ -125,10 +124,10 @@ data BF b = B { fromB :: b } | F { fromF :: b }
   deriving (Read, Show, Eq, Ord, Functor)
 
 markBF :: UExpr' u v s -> UExpr' (BF u) (BF v) s
-markBF = cmapBV fromB . mapFV F
+markBF = cmapBV viewVar . mapFV F
 
 unmarkBF :: UExpr' (BF u) (BF v) s -> UExpr' u v s
-unmarkBF = cmapBV B . mapFV fromF
+unmarkBF = cmapBV B . mapFV viewVar
 
 abstract
   :: (F.Fresh v, Hashable v, Eq v)
@@ -149,22 +148,6 @@ abstract targ e v = runFresh $ loop e
       x <- fresh Nothing
       bdy <- loop $ b (B x)
       return $ ULam s $ abstract x bdy . fromB
-
-instance (Hashable u, Eq u, F.Fresh u) => Foldable (UExpr' u v) where
-  foldMap f = runFresh . loop
-    where
-      loop (UPrimI s _)       = return $ f s
-      loop (UVar s _)         = return $ f s
-      loop (UPrimOp s _ e)    = (f s <>) <$> loop e
-      loop (UPrimBin s _ l r) = (f s <>) <$> getAp (foldMap (Ap . loop) [l, r])
-      loop (UIfte s p t e) =
-        (f s <>) <$> getAp (foldMap (Ap . loop) [p, t, e])
-      loop (ULam s b) = do
-        v <- fresh Nothing
-        (f s <>) <$> loop (b v)
-      loop (UFix s e) = (f s <>) <$> loop e
-      loop (UApp s l r) =
-        (f s <>) <$> getAp (foldMap (Ap . loop) [l, r])
 
 type UExpr u v = UExpr' u v ()
 
@@ -191,7 +174,22 @@ freshVar :: (Monad m, F.Fresh v, Hashable v, Eq v)
          => Maybe v -> FreshT v m (UTypeRep' v)
 freshVar = fmap UVarT . fresh
 
+data UId v a = UV v | UIn (UExpr' (UId v a) (UId v a) a)
 infixr 0 :->
+
+(=<<<)
+  :: (v -> UExpr' v v a)
+  -> UExpr' v v a
+  -> UExpr' v v a
+infixr 1 =<<<
+f =<<< UVar _ a = f a
+_ =<<< UPrimI s a = UPrimI s a
+f =<<< UPrimOp s op l = UPrimOp s op (f =<<< l)
+f =<<< UPrimBin s op l r = UPrimBin s op (f =<<< l) (f =<<< r)
+f =<<< UIfte s p t e = UIfte s (f =<<< p) (f =<<< t) (f =<<< e)
+f =<<< UFix s a = UFix s (f =<<< a)
+f =<<< UApp s l r = UApp s (f =<<< l) (f =<<< r)
+f =<<< ULam s b = ULam s ((f =<<<) . b)
 
 deriveEq1 ''UTypeRep'
 deriveOrd1 ''UTypeRep'
@@ -239,7 +237,7 @@ infer =
   uncurry solve
   <=< B.first ElaborationError . elaborate
 
-getType :: TExpr u v -> UTypeRep
+getType :: UExpr' u v (UTypeRep' w) -> UTypeRep' w
 getType (UPrimI t _)       = t
 getType (UVar t _)         = t
 getType (UPrimOp t _ _)    = t
@@ -323,3 +321,17 @@ solve
 solve ex eqs =
   B.bimap UnificationError ((<$> ex) . substituteM) $
     unify (HS.toList eqs)
+
+instance Num (UExpr' v u ()) where
+  (+) = UPrimBin () Add
+  (*) = UPrimBin () Mul
+  negate = error "Negating UExpr"
+  abs = error "Absing UExpr"
+  fromInteger = UPrimI () . fromInteger
+  signum = error "Signum UExpr"
+
+toClosedTy
+  :: UTypeRep' v -> Maybe (UTypeRep' Void)
+toClosedTy UVarT{}   = Nothing
+toClosedTy UNatT     = return UNatT
+toClosedTy (a :-> b) = (:->) <$> toClosedTy a <*> toClosedTy b

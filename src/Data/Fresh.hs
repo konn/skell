@@ -27,7 +27,7 @@ instance Fresh Int where
   fresh _ = succ . maximum . (0:) . toList
 
 instance Fresh Var where
-  origin = VarE "#arg" Nothing
+  origin = VarE "a" Nothing
   fresh (VarE a _) =
     VarE a . fmap (maybe 0 (getMax . succ)) . foldMap loop
     where

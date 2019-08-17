@@ -27,6 +27,7 @@ import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.Free
 import           Control.Monad.Trans.State.Strict
+import           Data.Coerce
 import           Data.Foldable
 import           Data.Function
 import           Data.Functor.Classes
@@ -80,7 +81,7 @@ newSubst :: (Functor t, Eq v, Hashable v, Monad m)
 newSubst v t = UnifyT $ do
   substs <- get
   let subs = Subst $ HM.singleton v (substituteFree substs t)
-  put $ substs <> subs
+  put $ coerce (HM.map (substituteFree subs)) substs <> subs
   return $ NewSubst subs
 
 step

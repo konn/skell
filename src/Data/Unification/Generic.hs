@@ -51,7 +51,7 @@ newtype UnifyT t v m a =
   deriving newtype (Functor, Applicative, Monad, MonadPlus, Alternative)
 
 data UnificationError t v =
-    OccurenceError v (UTree t v)
+    OccurrenceError v (UTree t v)
   | Mismatch (UTree t v) (UTree t v)
     deriving (Read, Show, Eq, Ord, Generic, Exception, Typeable)
 
@@ -88,7 +88,7 @@ step
 step (Pure l :== Pure r) = newSubst l (Pure r)
 step (e :== Pure v) = step (Pure v :== e)
 step (Pure v :== e)
-  | v `elem` e = throwError $ OccurenceError v e
+  | v `elem` e = throwError $ OccurrenceError v e
   | otherwise = newSubst v e
 step (l :== r) =
   case matchFree l r of

@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses, OverloadedStrings, PatternSynonyms #-}
 {-# LANGUAGE RankNTypes, ScopedTypeVariables, TemplateHaskell          #-}
 {-# LANGUAGE TypeApplications, TypeOperators, UndecidableInstances     #-}
+{-# LANGUAGE ViewPatterns                                              #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Language.Skell.Syntax.Untyped where
 import           Control.Arrow               hiding (arr, loop)
@@ -172,10 +173,18 @@ data UTypeRep' v = UNatT | (UTypeRep' v) :-> (UTypeRep' v) | UVarT v
   deriving stock (Functor, Foldable, Traversable)
   deriving anyclass (Hashable1)
 
+pattern AnyVar :: v -> BF v
+pattern AnyVar v <- (viewVar -> v)
+{-# COMPLETE AnyVar #-}
+
+viewVar :: BF p -> p
+viewVar (B v) = v
+viewVar (F v) = v
+
 instance Show v => Show (UTypeRep' v) where
   showsPrec _ UNatT = showString "ℕ"
   showsPrec d (a :-> b) = showParen (d > 10) $
-    showsPrec 10 a . showString " -> " . showsPrec 11 b
+    showsPrec 11 a . showString " -> " . showsPrec 10 b
   showsPrec _ (UVarT v) = shows v
 
 freshVar :: (Monad m, F.Fresh v, Hashable v, Eq v)
@@ -191,8 +200,8 @@ instance Show1 UTypeRep' where
   liftShowsPrec _ _ _ UNatT      = showString "ℕ"
   liftShowsPrec sd _ d (UVarT v) = sd d v
   liftShowsPrec sd sl d (l :-> r) = showParen (d > 0) $
-    liftShowsPrec sd sl 0 l . showString " -> " .
-    liftShowsPrec sd sl 1 r
+    liftShowsPrec sd sl 1 l . showString " -> " .
+    liftShowsPrec sd sl 0 r
 
 instance Matchable UTypeRep' where
   match = matchWithMetaVarCon @"UVarT"
@@ -280,12 +289,9 @@ elaborate
       return b
     elab :: UExpr (BF v) (BF v) -> Machine v (TExpr (BF v) (BF v))
     elab (UPrimI _ n)        = return $ UPrimI UNatT n
-    elab (UVar _ (B v))          = do
+    elab (UVar _ (AnyVar v))          = do
       t <- maybe (throwError $ NotInScope v) return =<< R.asks (HM.lookup v)
       return $ UVar t (B v)
-    elab (UVar _ (F v)) = do
-      t <- maybe (throwError $ NotInScope v) return =<< R.asks (HM.lookup v)
-      return $ UVar t (F v)
     elab (UPrimOp _ op a)    = UPrimOp UNatT op <$> elabWith UNatT a
     elab (UPrimBin _ op l r) =
       UPrimBin UNatT op <$> elabWith UNatT l <*> elabWith UNatT r

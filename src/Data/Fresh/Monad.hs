@@ -4,7 +4,7 @@
 module Data.Fresh.Monad
   ( FreshT, FreshM, Fresh,
     runFreshT, runFresh, runFreshWith, runFreshTWith,
-    fresh, reserve, reserveMany,
+    freshM, reserve, reserveMany,
     Var(..)
   ) where
 import           Control.Monad.Except
@@ -43,9 +43,9 @@ runFreshTWith inp = flip evalStateT (foldMap HS.singleton inp) . runFreshT_
 runFreshWith :: (Hashable v, Eq v, Foldable t) => t v -> FreshM v a -> a
 runFreshWith inp = flip evalState (foldMap HS.singleton inp) . runFreshT_
 
-fresh :: (Hashable v, Eq v, F.Fresh v, Monad m)
-      => Maybe v -> FreshT v m v
-fresh m = FreshT $ do
+freshM :: (Hashable v, Eq v, F.Fresh v, Monad m)
+       => Maybe v -> FreshT v m v
+freshM m = FreshT $ do
   v <- gets $ F.fresh $ fromMaybe F.origin m
   modify $ HS.insert v
   return v

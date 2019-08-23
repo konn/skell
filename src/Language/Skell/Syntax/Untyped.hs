@@ -5,12 +5,12 @@
 {-# LANGUAGE RankNTypes, ScopedTypeVariables, TemplateHaskell          #-}
 {-# LANGUAGE TypeApplications, TypeOperators, UndecidableInstances     #-}
 {-# LANGUAGE ViewPatterns                                              #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 module Language.Skell.Syntax.Untyped where
 import           Control.Arrow               hiding (arr, loop)
 import           Control.Exception           (Exception)
 import           Control.Monad
 import           Control.Monad.Except
+import           Control.Monad.Orphans       ()
 import qualified Control.Monad.Reader.Class  as R
 import           Control.Monad.Trans.RWS.CPS
 import qualified Control.Monad.Writer.Class  as W
@@ -95,7 +95,7 @@ instance (HasAnn s, Show v, Hashable v, Eq v, F.Fresh v) => Show (UExpr' v v s) 
         return $ addAnn d s $
           f . showChar ' ' . a
       go _ (ULam s b) = do
-        v <- fresh Nothing
+        v <- freshM Nothing
         bdy <- go 11 $ b v
         return $ showParen True $
           showString "lam" . toApp s
@@ -145,11 +145,11 @@ abstract targ e v = runFresh $ loop e
     loop (UIfte s p l r) = UIfte s <$> loop p <*> loop l <*> loop r
     loop (UFix s b) = UFix s <$> loop b
     loop (ULam s b) = do
-      x <- fresh Nothing
+      x <- freshM Nothing
       bdy <- loop $ b (B x)
       return $ ULam s $ abstract x bdy . fromB
 
-type UExpr u v = UExpr' u v ()
+type UExpr v = UExpr' v v ()
 
 data UTypeRep' v = UNatT | (UTypeRep' v) :-> (UTypeRep' v) | UVarT v
   deriving stock (Eq, Ord, Generic1)
@@ -172,7 +172,7 @@ instance Show v => Show (UTypeRep' v) where
 
 freshVar :: (Monad m, F.Fresh v, Hashable v, Eq v)
          => Maybe v -> FreshT v m (UTypeRep' v)
-freshVar = fmap UVarT . fresh
+freshVar = fmap UVarT . freshM
 
 data UId v a = UV v | UIn (UExpr' (UId v a) (UId v a) a)
 infixr 0 :->
@@ -214,25 +214,16 @@ instance Monad UTypeRep' where
   (l :-> r) >>= f = (l >>= f) :-> (r >>= f)
   UVarT v >>= f = f v
 
-instance Monad m => R.MonadReader r (RWST r w s m) where
-  local = local
-  ask   = ask
-
-instance (Monoid w, Monad m) => W.MonadWriter w (RWST r w s m) where
-  tell = tell
-  listen = listen
-  pass = pass
-
 type ClosedUTypeRep = UTypeRep' Void
 type UTypeRep = UTypeRep' Var
-type TExpr u v = UExpr' u v UTypeRep
+type TExpr v = UExpr' v v UTypeRep
 data InferenceError v =
     UnificationError (UnificationError UTypeRep' Var)
   | ElaborationError (ElaborationError v)
     deriving (Show, Eq, Ord, Typeable, Exception)
 
 infer :: (Hashable v, Eq v, F.Fresh v)
-      => UExpr v v -> Either (InferenceError v) (TExpr v v)
+      => UExpr v -> Either (InferenceError v) (TExpr v)
 infer =
   uncurry solve
   <=< B.first ElaborationError . elaborate
@@ -255,9 +246,6 @@ runRWST' act = evalRWST act mempty ()
 
 newtype ElaborationError v = NotInScope v
   deriving (Read, Show, Eq, Ord, Typeable, Exception)
-instance MonadError e m => MonadError e (RWST r w s m) where
-  throwError = lift . throwError
-  catchError = liftCatch catchError
 
 type Machine v =
   FreshT Var
@@ -270,10 +258,10 @@ type Machine v =
 
 elaborate
   :: forall v. (Hashable v, Eq v, F.Fresh v)
-  => UExpr v v
+  => UExpr v
   -> Either
       (ElaborationError v)
-      (TExpr v v, HashSet (Equation UTypeRep' Var))
+      (TExpr v, HashSet (Equation UTypeRep' Var))
 elaborate
   = right (first unmarkBF)
   . runExcept
@@ -285,7 +273,7 @@ elaborate
       b <- elab a
       W.tell $ HS.singleton $ getType b %== ty
       return b
-    elab :: UExpr (BF v) (BF v) -> Machine v (TExpr (BF v) (BF v))
+    elab :: UExpr (BF v) -> Machine v (TExpr (BF v))
     elab (UPrimI _ n)        = return $ UPrimI UNatT n
     elab (UVar _ (AnyVar v))          = do
       t <- maybe (throwError $ NotInScope v) return =<< R.asks (HM.lookup v)
@@ -310,14 +298,14 @@ elaborate
       a <- freshVar (Just "#a")
       b <- freshVar (Just "#b")
       let arr = a :-> b
-      v <- lift $ fresh Nothing
+      v <- lift $ freshM Nothing
       bdy' <- R.local (HM.insert v a) $ elabWith b $ bdy (B v)
       return $ ULam arr $ abstract v bdy' . fromB
 
 solve
-  :: TExpr v v
+  :: TExpr v
   -> HashSet (Equation UTypeRep' Var)
-  -> Either (InferenceError v) (TExpr v v)
+  -> Either (InferenceError v) (TExpr v)
 solve ex eqs =
   B.bimap UnificationError ((<$> ex) . substituteM) $
     unify (HS.toList eqs)

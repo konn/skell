@@ -26,7 +26,7 @@ instance (ToTypeRep a, ToTypeRep b) => ToTypeRep (a -> b) where
   toTypeRepM _ = (:->) <$> toTypeRepM (Proxy @a) <*> toTypeRepM (Proxy @b)
 
 untype
-  :: ExprF a (Id v) (Id v) -> UExpr v v
+  :: Expr a (Id v) -> UExpr v
 untype (Var (V v))      = UVar () v
 untype (Var (In e))     = untype e
 untype (PrimI n)        = UPrimI () n
@@ -42,7 +42,7 @@ data SomeTyped  u v where
   SomeTypedE :: ExprF a u v -> SomeTyped  u v
 
 deriving instance
-  (Fresh v, Show v) => Show (SomeTyped (Id v) (Id v))
+  (Fresh v, Hashable v, Eq v, Show v) => Show (SomeTyped (Id v) (Id v))
 
 promote
   :: forall u. UExpr' u u (UTypeRep' Void) -> SomeTyped (Id u) (Id u)
@@ -74,26 +74,11 @@ promote (UFix a b) =
 promote (ULam ~(a :-> b) f) =
   case (promoteTy a, promoteTy b) of
     (SomeTR (_ :: TypeRep a), SomeTR (_ :: TypeRep b)) ->
-      SomeTypedE $ Lam @_ @a @b  $ \case
+      SomeTypedE $ Lam @a @_ @b  $ \case
         In e -> case promote $ f =<<< (a <$ untype e) of
           SomeTypedE te -> unsafeCoerce te
         V v -> case promote $ f v of
           SomeTypedE te -> unsafeCoerce te
-
-data TypeRep a where
-  NatT :: TypeRep Natural
-  ArrT :: TypeRep a -> TypeRep b -> TypeRep (a -> b)
-
-data SomeTypeRep where
-  SomeTR :: TypeRep a -> SomeTypeRep
-
-instance TestEquality TypeRep where
-  testEquality NatT NatT = Just Refl
-  testEquality (ArrT s1 e1) (ArrT s2 e2) = do
-    Refl <- testEquality s1 s2
-    Refl <- testEquality e1 e2
-    return Refl
-  testEquality _    _ = Nothing
 
 promoteTy :: UTypeRep' Void -> SomeTypeRep
 promoteTy UNatT = SomeTR NatT

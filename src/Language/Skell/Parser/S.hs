@@ -43,7 +43,7 @@ skellP = varP
     <|> parens ifteP
     <|> parens appsP
  -}
-varP :: A.Parser (Expr a (Id Var))
+varP :: HasTypeRep a => A.Parser (Expr a (Id Var))
 varP = Var . V <$> ident style
 
 ifteP :: ParseSkell a => A.Parser (Expr a (Id Var))
@@ -53,32 +53,22 @@ ifteP = parens $
        <*> skellP
        <*> skellP
 
-fixP :: ParseSkell a => A.Parser (Expr a (Id Var))
-fixP = Fix <$> skellP
+fixP :: (HasTypeRep a, ParseSkell a) => A.Parser (Expr a (Id Var))
+fixP = parens $
+  Fix <$  reserve style "fix"
+      <*> skellP
 
-lamP :: ParseSkell b => A.Parser (Expr (a -> b) (Id Var))
+lamP :: (HasTypeRep a, ParseSkell b) => A.Parser (Expr (a -> b) (Id Var))
 lamP = parens $ do
   reserve style "lam"
   v <- brackets $ ident style
-  Lam . abstract v <$> skellP
-
-data TypeRep a where
-  NatT :: TypeRep Natural
-  ArrT :: TypeRep a -> TypeRep b -> TypeRep (a -> b)
-
-instance TestEquality TypeRep where
-  testEquality NatT NatT = Just Refl
-  testEquality (ArrT s1 e1) (ArrT s2 e2) = do
-    Refl <- testEquality s1 s2
-    Refl <- testEquality e1 e2
-    return Refl
-  testEquality _    _ = Nothing
+  either (error . show) Lam . abstract v <$> skellP
 
 instance ParseSkell Natural where
   skellP = PrimI . fromIntegral <$> natural
        <|> varP <|> primP <|> ifteP <|> fixP
 
-instance (ParseSkell b)
+instance (HasTypeRep a, HasTypeRep b, ParseSkell b)
       => ParseSkell (a -> b) where
   skellP = varP <|> lamP <|> ifteP <|> fixP
 

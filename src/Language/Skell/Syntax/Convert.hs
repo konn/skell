@@ -6,7 +6,6 @@ module Language.Skell.Syntax.Convert where
 import Data.Fresh.Monad
 import Data.Hashable
 import Data.Proxy
-import Data.Type.Equality
 import Data.Void
 import Language.Skell.Syntax         as Typed
 import Language.Skell.Syntax.Untyped as Untyped

@@ -1,36 +1,39 @@
-{-# LANGUAGE DataKinds, DeriveAnyClass, DeriveFoldable, DeriveFunctor  #-}
-{-# LANGUAGE DeriveGeneric, DeriveTraversable, DerivingVia             #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, LiberalTypeSynonyms  #-}
-{-# LANGUAGE MultiParamTypeClasses, OverloadedStrings, PatternSynonyms #-}
-{-# LANGUAGE RankNTypes, ScopedTypeVariables, TemplateHaskell          #-}
-{-# LANGUAGE TypeApplications, TypeOperators, UndecidableInstances     #-}
-{-# LANGUAGE ViewPatterns                                              #-}
-module Language.Skell.Syntax.Untyped where
-import           Control.Arrow               hiding (arr, loop)
-import           Control.Exception           (Exception)
+{-# LANGUAGE DataKinds, DeriveAnyClass, DeriveFoldable, DeriveFunctor      #-}
+{-# LANGUAGE DeriveGeneric, DeriveTraversable, DerivingVia                 #-}
+{-# LANGUAGE FlexibleContexts, FlexibleInstances, LambdaCase               #-}
+{-# LANGUAGE LiberalTypeSynonyms, MultiParamTypeClasses, OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms, RankNTypes, ScopedTypeVariables              #-}
+{-# LANGUAGE TemplateHaskell, TypeApplications, TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances, ViewPatterns                            #-}
+module Language.Skell.Syntax.Untyped
+  ( module Language.Skell.Syntax.Untyped
+  , PrimBin(..), PrimOp(..)
+  ) where
+import           Control.Exception              (Exception)
 import           Control.Monad
 import           Control.Monad.Except
-import           Control.Monad.Orphans       ()
-import qualified Control.Monad.Reader.Class  as R
+import           Control.Monad.Orphans          ()
+import qualified Control.Monad.Reader.Class     as R
 import           Control.Monad.Trans.RWS.CPS
-import qualified Control.Monad.Writer.Class  as W
-import qualified Data.Bifunctor              as B
+import           Control.Monad.Trans.Writer.CPS (Writer, execWriter)
+import qualified Control.Monad.Writer.Class     as W
+import qualified Data.Bifunctor                 as B
 import           Data.Bifunctor.TH
 import           Data.Deriving
-import qualified Data.Fresh                  as F
+import qualified Data.Fresh                     as F
 import           Data.Fresh.Monad
 import           Data.Functor.Classes
 import           Data.Hashable
 import           Data.Hashable.Lifted
-import           Data.HashMap.Strict         (HashMap)
-import qualified Data.HashMap.Strict         as HM
-import           Data.HashSet                (HashSet)
-import qualified Data.HashSet                as HS
+import           Data.HashMap.Strict            (HashMap)
+import qualified Data.HashMap.Strict            as HM
+import           Data.HashSet                   (HashSet)
+import qualified Data.HashSet                   as HS
 import           Data.Typeable
 import           Data.Unification.Generic
 import           Data.Void
 import           GHC.Generics
-import           Language.Skell.Syntax       hiding (abstract)
+import           Language.Skell.Syntax          hiding (abstract, support)
 import           Numeric.Natural
 
 data UExpr' u v s
@@ -129,15 +132,39 @@ markBF = cmapBV viewVar . mapFV F
 unmarkBF :: UExpr' (BF u) (BF v) s -> UExpr' u v s
 unmarkBF = cmapBV B . mapFV viewVar
 
+
+supportWith
+  :: forall u v s.
+     (Fresh v, Hashable v, Eq v)
+  => (v -> u) -> (u -> HashSet v) -> UExpr' u u s -> HashSet v
+supportWith fromUV toUV = execWriter . runFreshT . loop . markBF
+  where
+    loop :: UExpr' (BF u) (BF u) s -> FreshT v (Writer (HashSet v)) ()
+    loop (UVar _ agv)         =
+      case agv of
+        (F v) -> W.tell $ toUV v
+        _     -> return ()
+    loop UPrimI{}           = return ()
+    loop (UPrimOp _ _ l)    = loop l
+    loop (UPrimBin _ _ l r) = loop l >> loop r
+    loop (UIfte _ p t e)    = loop p >> loop t >> loop e
+    loop (UApp _ l r)       = loop l >> loop r
+    loop (UFix _ l)         = loop l
+    loop (ULam _ b) = do
+      v <- freshM Nothing
+      loop $ b $ B $ fromUV v
+
+support :: (Fresh v, Hashable v, Eq v) => UExpr' v v s -> HashSet v
+support = supportWith id HS.singleton
+
 abstract
   :: (F.Fresh v, Hashable v, Eq v)
-  => v -> UExpr' (BF v) (BF v) s -> (v -> UExpr' (BF v) (BF v) s)
-abstract targ e v = runFresh $ loop e
+  => v -> UExpr' v v s -> (v -> UExpr' v v s)
+abstract targ e v = runFreshWith (support e) $ loop e
   where
-    loop (UVar s (B u))
-      | u == targ = return $ UVar s (B v)
-      | otherwise = return $ UVar s (B u)
-    loop (UVar s (F x)) = return $ UVar s (F x)
+    loop (UVar s u)
+      | u == targ = return $ UVar s v
+      | otherwise = return $ UVar s u
     loop (UPrimI s n) = return $ UPrimI s n
     loop (UApp s l r) = UApp s <$> loop l <*> loop r
     loop (UPrimOp s op l) = UPrimOp s op <$> loop l
@@ -146,8 +173,8 @@ abstract targ e v = runFresh $ loop e
     loop (UFix s b) = UFix s <$> loop b
     loop (ULam s b) = do
       x <- freshM Nothing
-      bdy <- loop $ b (B x)
-      return $ ULam s $ abstract x bdy . fromB
+      bdy <- loop $ b x
+      return $ ULam s $ abstract x bdy
 
 type UExpr v = UExpr' v v ()
 
@@ -263,21 +290,20 @@ elaborate
       (ElaborationError v)
       (TExpr v, HashSet (Equation UTypeRep' Var))
 elaborate
-  = right (first unmarkBF)
-  . runExcept
+  = runExcept
   . runRWST'
   . runFreshT
-  . runFreshT . elab . markBF
+  . runFreshT . elab
   where
     elabWith ty a = do
       b <- elab a
       W.tell $ HS.singleton $ getType b %== ty
       return b
-    elab :: UExpr (BF v) -> Machine v (TExpr (BF v))
+    elab :: UExpr v -> Machine v (TExpr v)
     elab (UPrimI _ n)        = return $ UPrimI UNatT n
-    elab (UVar _ (AnyVar v))          = do
+    elab (UVar _ v)          = do
       t <- maybe (throwError $ NotInScope v) return =<< R.asks (HM.lookup v)
-      return $ UVar t (B v)
+      return $ UVar t v
     elab (UPrimOp _ op a)    = UPrimOp UNatT op <$> elabWith UNatT a
     elab (UPrimBin _ op l r) =
       UPrimBin UNatT op <$> elabWith UNatT l <*> elabWith UNatT r
@@ -299,8 +325,8 @@ elaborate
       b <- freshVar (Just "#b")
       let arr = a :-> b
       v <- lift $ freshM Nothing
-      bdy' <- R.local (HM.insert v a) $ elabWith b $ bdy (B v)
-      return $ ULam arr $ abstract v bdy' . fromB
+      bdy' <- R.local (HM.insert v a) $ elabWith b $ bdy v
+      return $ ULam arr $ abstract v bdy'
 
 solve
   :: TExpr v
@@ -323,3 +349,21 @@ toClosedTy
 toClosedTy UVarT{}   = Nothing
 toClosedTy UNatT     = return UNatT
 toClosedTy (a :-> b) = (:->) <$> toClosedTy a <*> toClosedTy b
+
+instance (Fresh v, Hashable v, Eq v) => Fresh (UId v s) where
+  origin = UV F.origin
+  fresh uv ts0 =
+    let ts = foldMap uidSupport ts0
+    in UV $ F.fresh (fromUV F.origin uv) ts
+
+fromUV :: p -> UId p a -> p
+fromUV _ (UV v) = v
+fromUV v _      = v
+
+uidSupport
+  :: (Hashable v, Fresh v, Eq v)
+  => UId v s -> HS.HashSet v
+uidSupport = loop
+  where
+    loop (UV v)  = HS.singleton v
+    loop (UIn e) = supportWith UV loop e

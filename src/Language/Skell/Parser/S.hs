@@ -66,11 +66,11 @@ lamP = parens $ do
 
 instance ParseSkell Natural where
   skellP = PrimI . fromIntegral <$> natural
-       <|> varP <|> primP <|> ifteP <|> fixP
+       <|> A.try primP <|> A.try ifteP <|> A.try fixP <|> varP
 
 instance (HasTypeRep a, HasTypeRep b, ParseSkell b)
       => ParseSkell (a -> b) where
-  skellP = varP <|> lamP <|> ifteP <|> fixP
+  skellP = A.try lamP <|> A.try ifteP <|> A.try fixP <|> varP
 
 primP :: A.Parser (Expr Natural (Id Var))
 primP =

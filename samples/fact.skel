@@ -1,0 +1,8 @@
+((fix
+  (lam [f]
+    (lam [n]
+      (if (is-zero n) 1 (* n (f (- n 1))))
+    )
+  )
+)
+5)
